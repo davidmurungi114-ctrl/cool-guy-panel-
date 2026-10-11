@@ -1,86 +1,134 @@
 const express = require('express');
 const fs = require('fs-extra');
-const { default: makeWASocket, useMultiFileAuthState, Browsers, delay, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const app = express();
-app.use(express.json());
-const PORT = process.env.PORT || 3000;
+const { default: makeWASocket, useMultiFileAuthState, Browsers, delay, makeCacheableSignalKeyStore, DisconnectReason } = require('@whiskeysockets/baileys');
 
-// BOT FUNCTION
-async function startBot(number) {
-    const id = number.replace(/[^0-9]/g,'');
-    const authPath = `./auth_${id}`;
-    if(!fs.existsSync(authPath)) return;
-    const { state, saveCreds } = await useMultiFileAuthState(authPath);
-    const sock = makeWASocket({
-        auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, pino({level:'silent'})) },
-        logger: pino({level:'silent'}),
-        browser: Browsers.ubuntu('Chrome')
-    });
-    sock.ev.on('creds.update', saveCreds);
-    sock.ev.on('connection.update', (u) => {
-        if(u.connection === 'open') console.log(`✅ BOT ${id} CONNECTED!`);
-    });
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if(!msg.message || msg.key.fromMe) return;
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-        const from = msg.key.remoteJid;
-        if(text === '.ping' || text.toLowerCase() === 'ping'){
-            await sock.sendMessage(from, {text: '🏓 Pong! COOLGUY Bot Online! ⚡'});
-        }
-        if(text === '.menu'){
-            await sock.sendMessage(from, {text: `*COOLGUY BOT MENU*\n\n.ping - speed\n.menu - menu\n.alive - status\n.owner - owner\n\nMade by David Murungi 🇺🇬`});
-        }
-        if(text === '.alive'){
-            await sock.sendMessage(from, {text: '✅ COOLGUY Bot is Alive!\nPanel: cool-guy-panel.onrender.com'});
-        }
-        if(text === '.owner'){
-            await sock.sendMessage(from, {text: '👑 Owner: David Murungi\n📍 Uganda'});
-        }
-    });
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.use(express.json());
+
+const bots = {};
+
+async function startBot(number){
+try{
+const { state, saveCreds } = await useMultiFileAuthState(`./auth_${number}`);
+const sock = makeWASocket({
+auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, pino({level:'silent'})) },
+logger: pino({level:'silent'}),
+printQRInTerminal: false,
+browser: Browsers.macOS('Desktop'),
+markOnlineOnConnect: false
+});
+sock.ev.on('creds.update', saveCreds);
+sock.ev.on('connection.update', async (up)=>{
+const { connection, lastDisconnect } = up;
+if(connection==='close'){
+let reason = lastDisconnect?.error?.output?.statusCode;
+if(reason!== DisconnectReason.loggedOut){
+console.log('Reconnecting '+number);
+startBot(number);
+} else {
+console.log('Logged out '+number);
+await fs.remove(`./auth_${number}`);
+}
+}
+if(connection==='open'){
+console.log('✅ BOT '+number+' CONNECTED!');
+}
+});
+
+sock.ev.on('messages.upsert', async ({messages})=>{
+let m = messages[0];
+if(!m.message || m.key.fromMe) return;
+let text = (m.message.conversation || m.message.extendedTextMessage?.text || '').trim();
+let sender = m.key.remoteJid;
+if(!text.startsWith('.')) return;
+let cmd = text.slice(1).split(' ')[0].toLowerCase();
+let args = text.slice(1).split(' ').slice(1).join(' ');
+
+if(cmd==='ping'){
+await sock.sendMessage(sender,{text:'🏓 Pong! COOLGUY Bot Online! Speed: '+(Date.now()-m.messageTimestamp*1000)+'ms'});
+}
+if(cmd==='menu'){
+await sock.sendMessage(sender,{text:`🤖 *COOLGUY TECH MENU*\n\n.ping - Check bot\n.menu - This menu\n.owner - Owner\n.alive - Bot status\n\nMade by David Murungi | Uganda 🇺🇬`});
+}
+if(cmd==='owner'){ await sock.sendMessage(sender,{text:'👑 Owner: David Murungi\n📞 +256781539746'}); }
+if(cmd==='alive'){ await sock.sendMessage(sender,{text:'✅ Bot Alive! COOLGUY TECH is running!'}); }
+});
+
+bots[number]=sock;
+}catch(e){ console.log('StartBot Error:', e); }
 }
 
-// Auto-start existing bots on boot
-fs.readdirSync('./').forEach(f => {
-    if(f.startsWith('auth_')) startBot(f.replace('auth_',''));
-});
-
+// Home Page
 app.get('/', (req,res)=>{
-res.send(`<html><head><title>COOLGUY TECH PANEL</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{background:#0a0a0a;color:#fff;font-family:sans-serif;text-align:center;padding:20px}.card{background:#1a1a1a;border:1px solid #333;padding:20px;border-radius:15px;max-width:400px;margin:auto}input{width:90%;padding:14px;border-radius:10px;border:none;margin:10px 0;font-size:16px}button{background:#00ff88;color:#000;padding:14px 20px;border:none;border-radius:10px;font-weight:bold;width:95%;font-size:16px} #code{font-size:28px;font-weight:bold;color:#00ff88;margin:20px 0;letter-spacing:2px}</style></head><body><div class="card"><h1>🤖 COOLGUY TECH</h1><p>Bot Hosting Panel</p><h3>Get Pairing Code</h3><input id="number" placeholder="256781539746"><button onclick="getCode()">GET CODE</button><div id="code"></div><div id="status" style="color:#aaa"></div><p style="font-size:12px;margin-top:20px">Made by David Murungi | Uganda</p></div><script>async function getCode(){const num=document.getElementById('number').value;const c=document.getElementById('code');const s=document.getElementById('status');if(!num){alert('Enter number');return}c.innerText='Generating...';s.innerText='Wait 10 sec...';try{const r=await fetch('/code?number='+num);const d=await r.json();if(d.code){c.innerText=d.code;s.innerText='Go to WhatsApp > Linked Devices > Link with phone number > Enter this code FAST (3 sec)!';}else{c.innerText='❌ '+(d.error||'Failed');s.innerText='';}}catch(e){c.innerText='❌ Server Error';}}</script></body></html>`);
+res.send(`<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>COOLGUY TECH</title>
+<style>body{background:#0f0f0f;color:#fff;font-family:sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
+.box{background:#1a1a1a;padding:30px;border-radius:20px;width:90%;max-width:400px;text-align:center;box-shadow:0 0 20px #00ff88}
+input{width:100%;padding:12px;border-radius:10px;border:none;margin:10px 0;text-align:center;font-size:18px}
+button{background:#00ff88;color:#000;padding:12px;width:100%;border:none;border-radius:10px;font-weight:bold;font-size:18px;cursor:pointer}
+.code{font-size:28px;color:#00ff88;margin:15px 0;font-weight:bold;letter-spacing:2px}
+small{color:#888}</style></head><body><div class="box">
+<h2>🤖 COOLGUY TECH</h2><p>Bot Hosting Panel</p><p><b>Get Pairing Code</b></p>
+<input id="num" placeholder="256781539746" value="256781539746">
+<button onclick="getCode()">GET CODE</button>
+<div id="result" class="code"></div>
+<p><small>Go to WhatsApp > Linked Devices > Link with phone number > Enter this code FAST (3 sec)!</small></p>
+<p><small>Made by David Murungi | Uganda</small></p>
+</div><script>
+async function getCode(){
+let n=document.getElementById('num').value;
+if(!n){alert('Enter number');return}
+document.getElementById('result').innerHTML='⏳ Generating...';
+let r=await fetch('/code?number='+n);
+let d=await r.json();
+if(d.code){document.getElementById('result').innerHTML=d.code}
+else{document.getElementById('result').innerHTML='❌ '+(d.error||'Failed')}
+}
+</script></body></html>`);
 });
 
+// Pairing Code - FIXED!
 app.get('/code', async (req,res)=>{
 let num = req.query.number?.replace(/[^0-9]/g,'');
-if(!num || num.length<10) return res.json({error:'Invalid number'});
+if(!num) return res.json({error:'Invalid number'});
 const id = num;
+console.log('Pairing request for '+id);
 try{
-if(fs.existsSync(`./auth_${id}`)){
-try{const creds = fs.readFileSync(`./auth_${id}/creds.json`,'utf8'); if(creds.includes('"registered":true')) return res.json({error:'Already registered - Use /delete?number='+id+' to reset'});}catch{}
-await fs.remove(`./auth_${id}`);
+// Don't delete if already exists - reuse!
+if(!fs.existsSync(`./auth_${id}`)){
+await fs.ensureDir(`./auth_${id}`);
 }
 const { state, saveCreds } = await useMultiFileAuthState(`./auth_${id}`);
-const sock = makeWASocket({ auth:{creds:state.creds, keys:makeCacheableSignalKeyStore(state.keys,pino({level:'silent'}))}, logger:pino({level:'silent'}), printQRInTerminal:false, browser:Browsers.ubuntu('Chrome')});
+const sock = makeWASocket({
+version: [2, 3000, 1015901307],
+auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, pino({level:'silent'})) },
+logger: pino({level:'silent'}),
+printQRInTerminal: false,
+browser: Browsers.macOS('Desktop')
+});
 sock.ev.on('creds.update', saveCreds);
+
 await delay(3000);
 let code = await sock.requestPairingCode(num);
-code = code?.match(/.{1,4}/g)?.join("-");
-res.json({code});
-sock.ev.on('connection.update', async (u)=>{
-if(u.connection==='open'){
-console.log('Connected '+id);
-await delay(2000);
-startBot(id);
+let formatted = code?.match(/.{1,4}/g)?.join("-") || code;
+console.log('Code for '+id+': '+formatted);
+res.json({code: formatted});
+
+// Keep socket alive for 120 seconds for pairing
+setTimeout(()=>{ try{sock.end();}catch(e){} }, 120000);
+
+}catch(e){
+console.log('Pair Error:', e.message);
+res.json({error: e.message});
 }
-});
-}catch(e){console.log(e); res.json({error:e.message});}
 });
 
 app.get('/delete', async (req,res)=>{
 let num = req.query.number?.replace(/[^0-9]/g,'');
-if(!num) return res.json({error:'Add?number=256...'});
-await fs.remove(`./auth_${num}`);
-res.json({success:'Deleted auth for '+num+'. Now get new code!'});
+if(!num) return res.json({error:'Need number'});
+await fs.remove(`./auth_${num}`).catch(()=>{});
+res.json({success:`Deleted auth for ${num}. Now get new code!`});
 });
 
-app.listen(PORT, ()=>console.log('COOLGUY RUNNING ON '+PORT));
+app.listen(PORT, ()=>console.log('Server running on '+PORT));
