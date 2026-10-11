@@ -1,17 +1,15 @@
 {
-  "name": "coolguy-tech-panel",
+  "name": "cool-guy-panel",
   "version": "1.0.0",
-  "description": "COOLGUY TECH PANEL",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "^6.7.18",
-    "express": "4.18.2",
-    "cors": "2.8.5",
-    "qrcode": "1.5.3",
-    "pino": "8.16.2",
-    "fs-extra": "11.1.1"
+    "express": "^4.18.2",
+    "fs-extra": "^11.2.0",
+    "pino": "^8.17.2",
+    "qrcode-terminal": "^0.12.0"
   }
 }
